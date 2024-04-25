@@ -143,7 +143,7 @@ numbers in the mode-line."
   :group 'winum
   :type  'integer)
 
-(defcustom winum-format " %s "
+(defcustom winum-format "%s "
   "Format string defining how the window number looks like in the mode-line.
 This string is passed to the `format' function along with the
 result of `winum-get-number-string'."
@@ -235,10 +235,12 @@ Needed to detect scope changes at runtime.")
 ;;;###autoload
 (define-minor-mode winum-mode
   "A minor mode that allows for managing windows based on window numbers."
-  nil
-  nil
-  winum-keymap
+  :require 'winum
+  :group 'winum
+  :init-value nil
+  :keymap winum-keymap
   :global t
+  :lighter nil
   (if winum-mode
       (winum--init)
     (winum--deinit)))
@@ -425,31 +427,36 @@ WINDOW: if specified, the window of which we want to know the number.
 (defun winum--install-mode-line (&optional position)
   "Install the window number from `winum-mode' to the mode-line.
 POSITION: position in the mode-line."
-  (let ((mode-line (default-value 'mode-line-format))
-        res)
-    (dotimes (i (min (or position winum-mode-line-position 1)
-                     (length mode-line)))
-      (push (pop mode-line) res))
-    (unless (equal (car mode-line) winum--mode-line-segment)
-      (push winum--mode-line-segment res))
-    (while mode-line
-      (push (pop mode-line) res))
-    (let ((nres (nreverse res)))
-      (setq mode-line-format nres)
-      (setq-default mode-line-format nres)))
+  (let* ((split-pos (or position (1- winum-mode-line-position) 0))
+         (global-mode-line (default-value 'mode-line-format))
+         (local-mode-line mode-line-format))
+    ;; Adjust the global mode line format only if it's not present
+    (unless (memq winum--mode-line-segment global-mode-line)
+      (setq-default mode-line-format
+                    (if (<= split-pos 0)
+                        (cons winum--mode-line-segment global-mode-line)
+                      (let ((prefix (cl-subseq global-mode-line 0 split-pos))
+                            (suffix (nthcdr split-pos global-mode-line)))
+                        (nconc prefix (list winum--mode-line-segment) suffix)))))
+    ;; Adjust buffer-local mode-line-format irrespective of whether the
+    ;; segment is present globally because it might have a different
+    ;; value locally
+    (unless (memq winum--mode-line-segment local-mode-line)
+      (setq mode-line-format
+            (if (<= split-pos 0)
+                (cons winum--mode-line-segment local-mode-line)
+              (let ((prefix (cl-subseq local-mode-line 0 split-pos))
+                    (suffix (nthcdr split-pos local-mode-line)))
+                (nconc prefix (list winum--mode-line-segment) suffix))))))
   (force-mode-line-update t))
 
 (defun winum--clear-mode-line ()
   "Remove the window number of `winum-mode' from the mode-line."
-  (let ((mode-line (default-value 'mode-line-format))
-        res)
-    (while mode-line
-      (let ((item (pop mode-line)))
-        (unless (equal item winum--mode-line-segment)
-        (push item res))))
-    (let ((nres (nreverse res)))
-      (setq mode-line-format nres)
-      (setq-default mode-line-format nres)))
+  (setq-default mode-line-format
+                (delq winum--mode-line-segment (default-value 'mode-line-format)))
+  (when (local-variable-p 'mode-line-format)
+    (setq mode-line-format
+          (delq winum--mode-line-segment mode-line-format)))
   (force-mode-line-update t))
 
 (defun winum--update ()
